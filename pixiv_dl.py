@@ -13,72 +13,54 @@ headers = {
     "cookie": cookie
 }
 
-output_folder = r'D:\pixiv_test'
+#ファイルのダウンロード先を指定
+output_folder = '.'
+
 
 def accessBookmark(sheets):
     p = 1
     all_page = 1
-    all_illusts = []
+    all_works = []
     i = 0
     flag = False
+    res = requests.get(f'{pixiv_domain}ajax/user/extra?lang=ja', headers=headers)
+    userId = res.headers['X-UserId']
+    
     while p <= all_page:
         time.sleep(1)
-        session = requests.Session()
-        res = session.get(f'{pixiv_domain}bookmark.php?rest=show&type=illust_all&p={p}', headers=headers)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        count_badge = int(soup.select_one('.column-label').span.get_text().replace('件', ''))
-        if sheets == 'all': sheets = count_badge
-        sheets = int(sheets)
-        all_page = count_badge // 20 + 1
-        
-        item_list = soup.select('#wrapper > div.layout-a > div.layout-column-2 > div._unit.manage-unit > form > div.display_editable_works > ul > li')
-        for item in item_list:
-            all_illusts += [{
-                'illust_id': item.find(class_='ui-scroll-view')['data-id'],
-                'single' : not item.find(class_='page-count')
-            }]
+        offset = 100*(p-1)
+        res = requests.get(f'{pixiv_domain}ajax/user/{userId}/illusts/bookmarks?tag=&offset={offset}&limit=100&rest=show&lang=ja', headers=headers)
+        data = res.json()
+
+        total = data['body']['total']
+        sheets = total if sheets == 'all' else int(sheets)
+        sheets = sheets if sheets < total else total
+        all_page = total // 100 + 1
+
+        works = data['body']['works']
+        for work in works:
+            all_works += [work['id']]
             i += 1
             if i >= sheets :
                 flag = True
                 break
         if flag : break
         p += 1
-    return all_illusts[::-1]
+    return all_works[::-1]
 
-def getUrls(illusts):
+def getUrls(works):
     urls = []
-    for i, illust in enumerate(illusts):
+    for i, illust_id in enumerate(works):
         time.sleep(1)
-        print(f'\r{len(illusts)}中{i+1}件目の画像URLを取得中', end='')
-        if illust['single']:
-            session = requests.Session()
-            res = session.get(f"{pixiv_domain}artworks/{illust['illust_id']}", headers=headers)
-            soup = BeautifulSoup(res.text, 'html.parser')
-            json_data = soup.select_one('#meta-preload-data')['content']
-            data = json.loads(json_data)
-            urls += [data['illust'][illust['illust_id']]['urls']['original']]
-        else:
-            session = requests.Session()
-            res = session.get(f"{pixiv_domain}ajax/illust/{illust['illust_id']}/pages?lang=ja", headers=headers)
-            data = res.json()['body']
-            urls += [d['urls']['original'] for d in data]
+        print(f'\r{len(works)}中{i+1}件目の画像URLを取得中', end='')
+        session = requests.Session()
+        res = session.get(f"{pixiv_domain}ajax/illust/{illust_id}/pages?lang=ja", headers=headers)
+        data = res.json()['body']
+        urls += [d['urls']['original'] for d in data]
     return urls
 
-def downloadImage(urls):
-    for i, url in enumerate(urls):
-        time.sleep(1)
-        session = requests.Session()
-        res = session.get(url, headers={"referer": pixiv_domain})
-        if res.status_code == 200:  
-            file_name = url.split('/')[-1]
-            with open(f'{output_folder}/{file_name}', 'wb') as fout:
-                fout.write(res.content)
-        else:
-            print(f'404error at {url}')
-        print(f'\r{len(urls)}件中{i+1}件 画像ダウンロード完了', end='')
-
 if __name__ == '__main__':
-    sheets = input('画像取得件数を入力してください。（すべてダウンロードする場合は「all」と入力）\n')
-    illsts = accessBookmark(sheets)
-    urls = getUrls(illsts)
+    sheets = input('イラスト取得件数を入力してください。（すべてダウンロードする場合は「all」と入力）\n')
+    works = accessBookmark(sheets)
+    urls = getUrls(works)
     downloadImage(urls)
